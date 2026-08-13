@@ -22,6 +22,8 @@ export default function MetadataPage() {
   const [loadingQueue, setLoadingQueue] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
+
   // Master Dropdown Data
   const [masterData, setMasterData] = useState<any>({});
   
@@ -131,50 +133,78 @@ export default function MetadataPage() {
   };
 
   const handleSubmit = async () => {
-    if (!formData.style_number || !formData.main_category_id) {
-      alert("Style Number and Main Category are required!");
+    setErrorBanner(null);
+    
+    // Enforce strict checks for compulsory fields
+    if (!(formData as any).style_number || !(formData as any).main_category_id) {
+      setErrorBanner("Style Number and Main Category are required fields.");
       return;
     }
 
-    setSubmitting(true);
-    const currentProduct = queue[currentIndex];
+    // Safe helper parsers for optional fields
+    const parseId = (val: any) => {
+      if (!val || val === "" || val === "0") return null;
+      const num = Number(val);
+      return isNaN(num) ? null : num;
+    };
 
+    const parseWeight = (val: any) => {
+      if (val === "" || val === null || val === undefined) return null;
+      const num = parseFloat(val);
+      return isNaN(num) ? null : num;
+    };
+
+    const parseText = (val: any) => {
+      if (!val || typeof val !== "string" || val.trim() === "") return null;
+      return val.trim();
+    };
+
+    // Build the safe payload safely bypassing strict TS type checks
+    const data = formData as any;
     const payload = {
-      cropped_product_id: currentProduct.id,
-      style_number: formData.style_number,
-      main_category_id: Number(formData.main_category_id),
-      category_ids: formData.category_ids,
-      subcategory_1_ids: formData.subcategory_1_ids,
-      subcategory_2_ids: formData.subcategory_2_ids,
-      diamond_type_id: formData.diamond_type_id ? Number(formData.diamond_type_id) : null,
-      shape_ids: formData.shape_ids,
-      cut_ids: formData.cut_ids,
-      colour_stone_ids: formData.colour_stone_ids,
-      market_id: formData.market_id ? Number(formData.market_id) : null,
-      metal_type_id: formData.metal_type_id ? Number(formData.metal_type_id) : null,
-      designer_id: formData.designer_id ? Number(formData.designer_id) : null,
-      total_weight: formData.total_weight ? parseFloat(formData.total_weight) : null,
+      cropped_product_id: parseId(data.cropped_product_id),
+      style_number: data.style_number.trim(),
+      main_category_id: Number(data.main_category_id),
+      category_ids: data.category_ids || [],
+      subcategory_1_ids: data.subcategory_1_ids || [],
+      subcategory_2_ids: data.subcategory_2_ids || [],
+      diamond_type_id: parseId(data.diamond_type_id),
+      shape_ids: data.shape_ids || [],
+      cut_ids: data.cut_ids || [],
+      colour_stone_ids: data.colour_stone_ids || [],
+      market_id: parseId(data.market_id),
+      metal_type_id: parseId(data.metal_type_id),
+      designer_id: parseId(data.designer_id),
+      collection_name: parseText(data.collection_name),
+      description: parseText(data.description),
+      launch_date: parseText(data.launch_date),
+      tag_name: parseText(data.tag_name),
+      tag_description: parseText(data.tag_description),
+      customer_number: parseText(data.customer_number),
+      customer_name: parseText(data.customer_name),
+      total_weight: parseWeight(data.total_weight),
+      metal_weight: parseWeight(data.metal_weight),
     };
 
     try {
       await axios.post("http://localhost:8000/api/metadata/submit", payload);
-      
-      // Remove item from queue array and reset form
-      const newQueue = [...queue];
-      newQueue.splice(currentIndex, 1);
-      setQueue(newQueue);
-      resetForm();
-      
-      // If we are at the end of the new queue, adjust index
-      if (currentIndex >= newQueue.length) {
-        setCurrentIndex(Math.max(0, newQueue.length - 1));
+      alert("Product metadata submitted successfully!");
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      let errorMessage = "Failed to submit product metadata.";
+
+      if (typeof detail === "string") {
+        errorMessage = detail;
+      } else if (Array.isArray(detail)) {
+        errorMessage = detail.map((d: any) => {
+          const fieldName = d.loc && d.loc.length > 0 ? d.loc[d.loc.length - 1] : "field";
+          return `Field "${fieldName}": ${d.msg}`;
+        }).join(" | ");
+      } else if (typeof detail === "object" && detail !== null) {
+        errorMessage = detail.msg || JSON.stringify(detail);
       }
-      
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save metadata. Ensure Style Number is unique.");
-    } finally {
-      setSubmitting(false);
+
+      setErrorBanner(errorMessage);
     }
   };
 
@@ -260,7 +290,11 @@ export default function MetadataPage() {
       <div className="w-2/3 p-8 overflow-y-auto bg-brand-light">
         <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
           <h2 className="text-2xl font-bold text-brand-dark mb-6 border-b pb-4">Product Details</h2>
-          
+          {errorBanner && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 text-sm">
+              <span>{errorBanner}</span>
+            </div>
+          )}
           <div className="space-y-8">
             {/* Required Basics */}
             <div className="grid grid-cols-2 gap-6">

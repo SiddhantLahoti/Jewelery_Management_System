@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Body
 
 from ..database import database, models
 
@@ -18,7 +19,7 @@ def get_db():
 
 # --- Pydantic Schema for Metadata Submission ---
 class SubmitMetadataRequest(BaseModel):
-    cropped_product_id: int
+    cropped_product_id: Optional[int] = None
     style_number: str
     main_category_id: int
     category_ids: List[int] = []        # Max 3 (enforced in frontend/backend)
@@ -226,3 +227,55 @@ def delete_product(cropped_product_id: int, db: Session = Depends(get_db)):
     db.commit()
 
     return {"message": "Product and its metadata deleted successfully."}
+
+
+# --- Add these to the bottom of backend/app/routers/metadata.py ---
+
+@router.get("/products/{cropped_product_id}/details")
+def get_product_details(cropped_product_id: int, db: Session = Depends(get_db)):
+    """Fetch specific product metadata for editing."""
+    meta = db.query(models.ProductMetadata).filter(models.ProductMetadata.cropped_product_id == cropped_product_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Product metadata not found.")
+    return meta
+
+@router.put("/products/{cropped_product_id}")
+def update_product_metadata(
+    cropped_product_id: int, 
+    payload: SubmitMetadataRequest,  # Explicitly tell FastAPI this is the request body
+    db: Session = Depends(get_db)
+):
+    """Update an existing product's metadata."""
+    meta = db.query(models.ProductMetadata).filter(models.ProductMetadata.cropped_product_id == cropped_product_id).first()
+    if not meta:
+        raise HTTPException(status_code=404, detail="Product not found.")
+    
+    # Check if new style number conflicts with another product
+    if meta.style_number.lower() != payload.style_number.lower():
+        existing_style = db.query(models.ProductMetadata).filter(
+            models.ProductMetadata.style_number.ilike(payload.style_number)
+        ).first()
+        if existing_style:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Warning: Style Number '{payload.style_number}' already exists in the system!"
+            )
+
+    # Update fields
+    meta.style_number = payload.style_number
+    meta.main_category_id = payload.main_category_id
+    meta.category_ids = payload.category_ids
+    meta.subcategory_1_ids = payload.subcategory_1_ids
+    meta.subcategory_2_ids = payload.subcategory_2_ids
+    meta.diamond_type_id = payload.diamond_type_id
+    meta.shape_ids = payload.shape_ids
+    meta.cut_ids = payload.cut_ids
+    meta.colour_stone_ids = payload.colour_stone_ids
+    meta.market_id = payload.market_id
+    meta.metal_type_id = payload.metal_type_id
+    meta.designer_id = payload.designer_id
+    meta.total_weight = payload.total_weight
+
+    db.commit()
+    db.refresh(meta)
+    return {"message": "Product updated successfully.", "metadata": meta}
