@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Trash2, Edit3, Loader2, Search, Filter, RefreshCw, X, Save, AlertCircle } from "lucide-react";
+import { Trash2, Edit3, Loader2, Search, Filter, RefreshCw, X, Save, AlertCircle, Image as ImageIcon } from "lucide-react";
 
 interface DropdownOption {
   id: number;
@@ -171,7 +171,6 @@ export default function CatalogPage() {
       return;
     }
 
-    // Safe helper parsers to handle empty inputs or cleared numbers gracefully
     const parseId = (val: any) => {
       if (!val || val === "" || val === "0") return null;
       const num = Number(val);
@@ -203,7 +202,7 @@ export default function CatalogPage() {
     try {
       await axios.put(`http://localhost:8000/api/metadata/products/${editingProduct.cropped_product_id}`, payload);
       setEditingProduct(null);
-      fetchCatalog(); // Refresh catalog grid
+      fetchCatalog();
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       let errorMessage = "Failed to update product metadata.";
@@ -232,6 +231,10 @@ export default function CatalogPage() {
       alert("Failed to delete product.");
     }
   };
+
+  const activeImage = editingProduct 
+    ? products.find(p => p.cropped_product_id === editingProduct.cropped_product_id)?.image_path 
+    : null;
 
   return (
     <div className="min-h-screen bg-brand-light p-8 font-sans">
@@ -381,271 +384,285 @@ export default function CatalogPage() {
           </div>
         )}
 
-        {/* FULL EDIT MODAL */}
+        {/* FULL EDIT SLIDE-OVER DRAWER: DASHBOARD GRID */}
         {editingProduct && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-            <div className="bg-white rounded-2xl max-w-3xl w-full p-8 shadow-2xl relative my-8 max-h-[90vh] overflow-y-auto">
-              <button 
-                onClick={() => setEditingProduct(null)}
-                className="absolute top-6 right-6 p-2 text-gray-400 hover:text-gray-600 rounded-full"
-              >
-                <X className="w-6 h-6" />
-              </button>
-
-              <h2 className="text-2xl font-bold text-brand-dark mb-6">Edit Product Details</h2>
-
-              {errorBanner && (
-                <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 text-sm">
-                  <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0 text-red-500" />
-                  <span>{errorBanner}</span>
+          <div className="fixed inset-0 z-50 flex justify-end bg-black/40 backdrop-blur-sm transition-opacity">
+            
+            <div 
+              className="bg-brand-light w-full max-w-[85vw] h-full shadow-2xl flex flex-col transform transition-transform duration-300 outline-none"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSaveEdit();
+                }
+              }}
+            >
+              {/* Drawer Header */}
+              <div className="bg-white px-6 py-4 border-b border-gray-200 flex justify-between items-center z-10 shadow-sm flex-shrink-0">
+                <div>
+                  <h2 className="text-xl font-bold text-brand-dark">Edit Product Metadata</h2>
+                  <p className="text-xs text-gray-500">Press <kbd className="bg-gray-100 px-1 rounded border">Ctrl + Enter</kbd> to save instantly.</p>
                 </div>
-              )}
+                <button 
+                  onClick={() => setEditingProduct(null)}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
 
-              {modalLoading ? (
-                <div className="flex justify-center py-12"><Loader2 className="animate-spin text-brand-blue w-8 h-8" /></div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Style Number & Main Category */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Style Number *</label>
-                      <input 
-                        type="text" 
-                        value={editingProduct.style_number || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, style_number: e.target.value})}
-                        className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-brand-blue"
+              {/* Drawer Content Area */}
+              <div className="flex-1 overflow-hidden flex min-h-0">
+                
+                {/* Left Side: Pinned Image */}
+                <div className="w-[300px] bg-gray-50 border-r border-gray-200 p-6 flex flex-col items-center flex-shrink-0">
+                  <div className="w-full bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4 h-64 flex items-center justify-center">
+                    {activeImage ? (
+                      <img 
+                        src={`http://localhost:8000/${activeImage}`} 
+                        alt="Editing Sketch" 
+                        className="max-h-full max-w-full object-contain drop-shadow"
                       />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Main Category *</label>
-                      <select 
-                        value={editingProduct.main_category_id || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, main_category_id: Number(e.target.value)})}
-                        className="w-full border border-gray-300 rounded-lg p-3 bg-white outline-none"
-                      >
-                        <option value="">-- Select --</option>
-                        {masterData.main_categories?.map((cat: any) => (
-                          <option key={cat.id} value={cat.id}>{cat.name}</option>
-                        ))}
-                      </select>
-                    </div>
+                    ) : (
+                      <ImageIcon className="w-10 h-10 text-gray-300" />
+                    )}
                   </div>
-
-                  {/* Cascading Category Pills (Max 3) */}
-                  <div className="bg-brand-light/50 p-4 rounded-xl border border-brand-peach/30 space-y-4">
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-2">Categories (Max 3)</label>
-                      <div className="flex flex-wrap gap-2">
-                        {editCategories.map((cat: any) => {
-                          const isSelected = editingProduct.category_ids?.includes(cat.id);
-                          return (
-                            <button
-                              key={cat.id}
-                              onClick={() => handleEditMultiSelect("category_ids", cat.id, 3)}
-                              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                                isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                              }`}
-                            >
-                              {cat.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-2">Subcategory 1 (Max 3)</label>
-                      <div className="flex flex-wrap gap-2">
-                        {editSub1.map((sub: any) => {
-                          const isSelected = editingProduct.subcategory_1_ids?.includes(sub.id);
-                          return (
-                            <button
-                              key={sub.id}
-                              onClick={() => handleEditMultiSelect("subcategory_1_ids", sub.id, 3)}
-                              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                                isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                              }`}
-                            >
-                              {sub.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-2">Subcategory 2 (Max 3)</label>
-                      <div className="flex flex-wrap gap-2">
-                        {editSub2.map((sub: any) => {
-                          const isSelected = editingProduct.subcategory_2_ids?.includes(sub.id);
-                          return (
-                            <button
-                              key={sub.id}
-                              onClick={() => handleEditMultiSelect("subcategory_2_ids", sub.id, 3)}
-                              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                                isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                              }`}
-                            >
-                              {sub.name}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Material, Diamond, Market, Designer */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Metal Type</label>
-                      <select 
-                        value={editingProduct.metal_type_id || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, metal_type_id: Number(e.target.value)})}
-                        className="w-full border border-gray-300 rounded-lg p-3 bg-white outline-none"
-                      >
-                        <option value="">-- Select --</option>
-                        {masterData.metal_types?.map((item: any) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Diamond Type</label>
-                      <select 
-                        value={editingProduct.diamond_type_id || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, diamond_type_id: Number(e.target.value)})}
-                        className="w-full border border-gray-300 rounded-lg p-3 bg-white outline-none"
-                      >
-                        <option value="">-- Select --</option>
-                        {masterData.diamond_types?.map((item: any) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Market</label>
-                      <select 
-                        value={editingProduct.market_id || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, market_id: Number(e.target.value)})}
-                        className="w-full border border-gray-300 rounded-lg p-3 bg-white outline-none"
-                      >
-                        <option value="">-- Select --</option>
-                        {masterData.markets?.map((item: any) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-bold text-brand-dark mb-1">Designer</label>
-                      <select 
-                        value={editingProduct.designer_id || ""}
-                        onChange={(e) => setEditingProduct({...editingProduct, designer_id: Number(e.target.value)})}
-                        className="w-full border border-gray-300 rounded-lg p-3 bg-white outline-none"
-                      >
-                        <option value="">-- Select --</option>
-                        {masterData.designers?.map((item: any) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Total Weight */}
-                  <div>
-                    <label className="block text-sm font-bold text-brand-dark mb-1">Total Weight (g)</label>
-                    <input 
-                      type="number" 
-                      step="0.01"
-                      value={editingProduct.total_weight || ""}
-                      onChange={(e) => setEditingProduct({...editingProduct, total_weight: e.target.value})}
-                      className="w-full border border-gray-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-brand-blue"
-                      placeholder="e.g. 12.50"
-                    />
-                  </div>
-
-                  {/* Shapes (Multi-select pills) */}
-                  <div>
-                    <label className="block text-sm font-bold text-brand-dark mb-2">Shapes (Select multiple)</label>
-                    <div className="flex flex-wrap gap-2">
-                      {masterData.shapes?.map((opt: any) => {
-                        const isSelected = editingProduct.shape_ids?.includes(opt.id);
-                        return (
-                          <button
-                            key={opt.id}
-                            onClick={() => handleEditMultiSelect("shape_ids", opt.id, 10)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                              isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                            }`}
-                          >
-                            {opt.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Cuts (Multi-select pills) */}
-                  <div>
-                    <label className="block text-sm font-bold text-brand-dark mb-2">Cuts (Select multiple)</label>
-                    <div className="flex flex-wrap gap-2">
-                      {masterData.cuts?.map((opt: any) => {
-                        const isSelected = editingProduct.cut_ids?.includes(opt.id);
-                        return (
-                          <button
-                            key={opt.id}
-                            onClick={() => handleEditMultiSelect("cut_ids", opt.id, 10)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                              isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                            }`}
-                          >
-                            {opt.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Colour Stones (Multi-select pills) */}
-                  <div>
-                    <label className="block text-sm font-bold text-brand-dark mb-2">Colour Stones (Select multiple)</label>
-                    <div className="flex flex-wrap gap-2">
-                      {masterData.colour_stones?.map((opt: any) => {
-                        const isSelected = editingProduct.colour_stone_ids?.includes(opt.id);
-                        return (
-                          <button
-                            key={opt.id}
-                            onClick={() => handleEditMultiSelect("colour_stone_ids", opt.id, 10)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
-                              isSelected ? "bg-brand-blue border-brand-blue text-white" : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach"
-                            }`}
-                          >
-                            {opt.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex space-x-3 pt-4 border-t">
-                    <button
-                      onClick={() => setEditingProduct(null)}
-                      className="flex-1 py-3 bg-gray-100 font-bold text-gray-600 rounded-xl hover:bg-gray-200 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSaveEdit}
-                      className="flex-1 py-3 bg-brand-blue text-white font-bold rounded-xl hover:bg-blue-600 transition-colors shadow-md flex items-center justify-center"
-                    >
-                      <Save className="w-5 h-5 mr-2" /> Save Changes
-                    </button>
+                  <div className="text-center w-full">
+                    <span className="text-xs text-gray-400 uppercase tracking-widest font-bold">Editing</span>
+                    <h3 className="text-xl font-bold text-brand-dark truncate mt-1">
+                      {editingProduct.style_number || "Draft"}
+                    </h3>
                   </div>
                 </div>
-              )}
+
+                {/* Right Side: Ultra-Dense Dashboard Grid */}
+                <div className="flex-1 flex flex-col bg-brand-light p-5 overflow-hidden">
+                  
+                  {errorBanner && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 text-xs shadow-sm flex-shrink-0">
+                      <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0 text-red-500" />
+                      <span>{errorBanner}</span>
+                    </div>
+                  )}
+
+                  {modalLoading ? (
+                    <div className="flex justify-center items-center h-full"><Loader2 className="animate-spin text-brand-blue w-8 h-8" /></div>
+                  ) : (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex flex-col flex-1 min-h-0 space-y-4 overflow-y-auto">
+                      
+                      {/* TOP SECTION: Core 4-Column Grid */}
+                      <div className="grid grid-cols-4 gap-4 p-4 bg-gray-50/50 rounded-lg border border-gray-100 flex-shrink-0">
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Style Number *</label>
+                          <input 
+                            type="text" 
+                            value={editingProduct.style_number || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, style_number: e.target.value})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-brand-blue bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Main Category *</label>
+                          <select 
+                            value={editingProduct.main_category_id || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, main_category_id: Number(e.target.value)})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-brand-blue"
+                          >
+                            <option value="">-- Select --</option>
+                            {masterData.main_categories?.map((cat: any) => (
+                              <option key={cat.id} value={cat.id}>{cat.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Metal Type</label>
+                          <select 
+                            value={editingProduct.metal_type_id || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, metal_type_id: Number(e.target.value)})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-brand-blue"
+                          >
+                            <option value="">-- Select --</option>
+                            {masterData.metal_types?.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Total Weight (g)</label>
+                          <input 
+                            type="number" 
+                            step="0.01"
+                            value={editingProduct.total_weight || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, total_weight: e.target.value})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm outline-none focus:ring-2 focus:ring-brand-blue bg-white"
+                          />
+                        </div>
+                        
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Designer</label>
+                          <select 
+                            value={editingProduct.designer_id || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, designer_id: Number(e.target.value)})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-brand-blue"
+                          >
+                            <option value="">-- Select --</option>
+                            {masterData.designers?.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Market</label>
+                          <select 
+                            value={editingProduct.market_id || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, market_id: Number(e.target.value)})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-brand-blue"
+                          >
+                            <option value="">-- Select --</option>
+                            {masterData.markets?.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">Diamond Type</label>
+                          <select 
+                            value={editingProduct.diamond_type_id || ""}
+                            onChange={(e) => setEditingProduct({...editingProduct, diamond_type_id: Number(e.target.value)})}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-brand-blue"
+                          >
+                            <option value="">-- Select --</option>
+                            {masterData.diamond_types?.map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* BOTTOM SECTION: 2-Column Split for Pills */}
+                      <div className="flex-1 flex gap-4 min-h-0">
+                        
+                        {/* LEFT SPLIT: Classifications */}
+                        <div className="w-1/2 flex flex-col space-y-4 p-4 border border-gray-100 rounded-xl overflow-y-auto custom-scrollbar">
+                          <h3 className="text-xs font-bold text-brand-dark uppercase tracking-wider border-b border-gray-100 pb-2">Classifications</h3>
+                          
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Category <span className="font-normal">(Max 3)</span></label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {editCategories.map((cat: any) => {
+                                const isSelected = editingProduct.category_ids?.includes(cat.id);
+                                return (
+                                  <button key={cat.id} onClick={() => handleEditMultiSelect("category_ids", cat.id, 3)}
+                                    className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                      isSelected ? "bg-brand-blue border-brand-blue text-white shadow-sm" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                    }`}>
+                                    {cat.name}
+                                  </button>
+                                );
+                              })}
+                              {editCategories.length === 0 && <span className="text-[11px] text-gray-400 italic">Select a Main Category first.</span>}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Subcategory 1 <span className="font-normal">(Max 3)</span></label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {editSub1.map((sub: any) => {
+                                const isSelected = editingProduct.subcategory_1_ids?.includes(sub.id);
+                                return (
+                                  <button key={sub.id} onClick={() => handleEditMultiSelect("subcategory_1_ids", sub.id, 3)}
+                                    className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                      isSelected ? "bg-brand-blue border-brand-blue text-white shadow-sm" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                    }`}>
+                                    {sub.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Subcategory 2 <span className="font-normal">(Max 3)</span></label>
+                            <div className="flex flex-wrap gap-1.5">
+                              {editSub2.map((sub: any) => {
+                                const isSelected = editingProduct.subcategory_2_ids?.includes(sub.id);
+                                return (
+                                  <button key={sub.id} onClick={() => handleEditMultiSelect("subcategory_2_ids", sub.id, 3)}
+                                    className={`px-2.5 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                      isSelected ? "bg-brand-blue border-brand-blue text-white shadow-sm" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                    }`}>
+                                    {sub.name}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* RIGHT SPLIT: Gems */}
+                        <div className="w-1/2 flex flex-col space-y-4 p-4 border border-gray-100 rounded-xl overflow-y-auto custom-scrollbar">
+                          <h3 className="text-xs font-bold text-brand-dark uppercase tracking-wider border-b border-gray-100 pb-2">Materials & Gems</h3>
+                          
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Shapes</label>
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-2 custom-scrollbar">
+                              {masterData.shapes?.map((opt: any) => (
+                                <button key={opt.id} onClick={() => handleEditMultiSelect("shape_ids", opt.id, 10)}
+                                  className={`px-2 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                    editingProduct.shape_ids?.includes(opt.id) ? "bg-brand-blue border-brand-blue text-white" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                  }`}>
+                                  {opt.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Cuts</label>
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-2 custom-scrollbar">
+                              {masterData.cuts?.map((opt: any) => (
+                                <button key={opt.id} onClick={() => handleEditMultiSelect("cut_ids", opt.id, 10)}
+                                  className={`px-2 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                    editingProduct.cut_ids?.includes(opt.id) ? "bg-brand-blue border-brand-blue text-white" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                  }`}>
+                                  {opt.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-bold text-gray-500 mb-1.5">Colour Stones</label>
+                            <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-2 custom-scrollbar">
+                              {masterData.colour_stones?.map((opt: any) => (
+                                <button key={opt.id} onClick={() => handleEditMultiSelect("colour_stone_ids", opt.id, 10)}
+                                  className={`px-2 py-1 text-[11px] font-medium rounded-full border transition-all ${
+                                    editingProduct.colour_stone_ids?.includes(opt.id) ? "bg-brand-blue border-brand-blue text-white" : "bg-gray-50 border-gray-200 text-gray-600 hover:border-brand-peach"
+                                  }`}>
+                                  {opt.name}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Sticky Footer */}
+              <div className="bg-white px-6 py-4 border-t border-gray-200 flex justify-end items-center shadow-lg flex-shrink-0">
+                <button onClick={() => setEditingProduct(null)} className="px-6 py-2.5 bg-gray-100 font-bold text-gray-600 rounded-xl hover:bg-gray-200 transition-colors mr-3">
+                  Cancel
+                </button>
+                <button onClick={handleSaveEdit} className="px-8 py-2.5 bg-brand-blue text-white font-bold rounded-xl hover:bg-blue-600 transition-colors shadow-md flex items-center justify-center">
+                  <Save className="w-4 h-4 mr-2" /> Save Changes
+                </button>
+              </div>
+
             </div>
           </div>
         )}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import axios from "axios";
-import { Loader2, Save, SkipForward, AlertCircle } from "lucide-react";
+import { Loader2, Save, AlertCircle } from "lucide-react";
 
 // --- Types ---
 interface PendingProduct {
@@ -15,14 +15,21 @@ interface DropdownOption {
   name: string;
 }
 
+const getEmptyForm = () => ({
+  style_number: "", main_category_id: "", category_ids: [] as number[], subcategory_1_ids: [] as number[],
+  subcategory_2_ids: [] as number[], diamond_type_id: "", shape_ids: [] as number[], cut_ids: [] as number[],
+  colour_stone_ids: [] as number[], market_id: "", metal_type_id: "", designer_id: "", total_weight: "", metal_weight: "",
+});
+
 export default function MetadataPage() {
-  // Queue State
+  // Queue & Draft State
   const [queue, setQueue] = useState<PendingProduct[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loadingQueue, setLoadingQueue] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
+  
+  // The Background Memory Bank
+  const [drafts, setDrafts] = useState<Record<number, any>>({}); 
 
   // Master Dropdown Data
   const [masterData, setMasterData] = useState<any>({});
@@ -33,23 +40,9 @@ export default function MetadataPage() {
   const [sub2, setSub2] = useState<DropdownOption[]>([]);
 
   // Form State
-  const [formData, setFormData] = useState({
-    style_number: "",
-    main_category_id: "",
-    category_ids: [] as number[],
-    subcategory_1_ids: [] as number[],
-    subcategory_2_ids: [] as number[],
-    diamond_type_id: "",
-    shape_ids: [] as number[],
-    cut_ids: [] as number[],
-    colour_stone_ids: [] as number[],
-    market_id: "",
-    metal_type_id: "",
-    designer_id: "",
-    total_weight: "",
-  });
+  const [formData, setFormData] = useState(getEmptyForm());
 
-  // 1. Initial Load: Fetch Queue and Master Dropdowns
+  // 1. Initial Load: Fetch Queue, Master Dropdowns, AND LocalStorage Drafts
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -59,6 +52,21 @@ export default function MetadataPage() {
         ]);
         setQueue(queueRes.data);
         setMasterData(masterRes.data);
+
+        // --- NEW: Restore Bulletproof Auto-Saves from Browser Memory ---
+        const savedDrafts = localStorage.getItem("jewelryMetadataDrafts");
+        if (savedDrafts) {
+          const parsedDrafts = JSON.parse(savedDrafts);
+          setDrafts(parsedDrafts);
+          
+          // Pre-load the draft for the very first item if it exists
+          if (queueRes.data.length > 0) {
+            const firstId = queueRes.data[0].id;
+            if (parsedDrafts[firstId]) {
+              setFormData(parsedDrafts[firstId]);
+            }
+          }
+        }
       } catch (error) {
         console.error("Failed to load initial data", error);
       } finally {
@@ -68,14 +76,31 @@ export default function MetadataPage() {
     fetchInitialData();
   }, []);
 
+  // --- NEW: Invisible Auto-Save Trigger ---
+  // Every time formData changes, save it straight to the browser's hard drive
+  useEffect(() => {
+    if (queue.length > 0 && currentIndex < queue.length) {
+      const currentId = queue[currentIndex].id;
+      
+      // Only auto-save if they've actually typed something (prevents saving blank forms)
+      const hasData = formData.style_number || formData.main_category_id || formData.category_ids.length > 0;
+      
+      if (hasData) {
+        setDrafts((prev) => {
+          const updated = { ...prev, [currentId]: formData };
+          localStorage.setItem("jewelryMetadataDrafts", JSON.stringify(updated));
+          return updated;
+        });
+      }
+    }
+  }, [formData]);
+
   // 2. Cascade Logic: When Main Category changes, fetch Categories
   useEffect(() => {
     if (!formData.main_category_id) {
       setCategories([]);
-      setFormData(prev => ({ ...prev, category_ids: [], subcategory_1_ids: [], subcategory_2_ids: [] }));
       return;
     }
-    
     axios.get(`http://localhost:8000/api/metadata/dropdowns/categories`, {
       params: { main_category_id: formData.main_category_id }
     }).then(res => setCategories(res.data));
@@ -86,11 +111,8 @@ export default function MetadataPage() {
     if (formData.category_ids.length === 0) {
       setSub1([]);
       setSub2([]);
-      setFormData(prev => ({ ...prev, subcategory_1_ids: [], subcategory_2_ids: [] }));
       return;
     }
-
-    // Prepare params for array (FastAPI expects ?category_ids=1&category_ids=2)
     const params = new URLSearchParams();
     formData.category_ids.forEach(id => params.append("category_ids", id.toString()));
 
@@ -107,41 +129,34 @@ export default function MetadataPage() {
     setFormData(prev => {
       const currentSelected = prev[field as keyof typeof prev] as number[];
       if (currentSelected.includes(id)) {
-        // Remove it
         return { ...prev, [field]: currentSelected.filter(item => item !== id) };
       } else {
-        // Add it if under max limit
         if (currentSelected.length >= max) return prev;
         return { ...prev, [field]: [...currentSelected, id] };
       }
     });
   };
 
-  const handleSkip = () => {
-    if (currentIndex < queue.length - 1) {
-      setCurrentIndex(prev => prev + 1);
-      resetForm();
-    }
-  };
+  const handleJumpToItem = (idx: number) => {
+    if (idx === currentIndex) return;
 
-  const resetForm = () => {
-    setFormData({
-      style_number: "", main_category_id: "", category_ids: [], subcategory_1_ids: [],
-      subcategory_2_ids: [], diamond_type_id: "", shape_ids: [], cut_ids: [],
-      colour_stone_ids: [], market_id: "", metal_type_id: "", designer_id: "", total_weight: "",
-    });
+    // Check memory bank for the next item's draft, or load a clean slate
+    const nextProductId = queue[idx].id;
+    setCurrentIndex(idx);
+    
+    setFormData(drafts[nextProductId] || getEmptyForm());
+    setErrorBanner(null);
   };
 
   const handleSubmit = async () => {
     setErrorBanner(null);
     
-    // Enforce strict checks for compulsory fields
     if (!(formData as any).style_number || !(formData as any).main_category_id) {
       setErrorBanner("Style Number and Main Category are required fields.");
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
-    // Safe helper parsers for optional fields
     const parseId = (val: any) => {
       if (!val || val === "" || val === "0") return null;
       const num = Number(val);
@@ -154,15 +169,11 @@ export default function MetadataPage() {
       return isNaN(num) ? null : num;
     };
 
-    const parseText = (val: any) => {
-      if (!val || typeof val !== "string" || val.trim() === "") return null;
-      return val.trim();
-    };
-
-    // Build the safe payload safely bypassing strict TS type checks
     const data = formData as any;
+    const currentItem = queue[currentIndex];
+
     const payload = {
-      cropped_product_id: parseId(data.cropped_product_id),
+      cropped_product_id: currentItem ? currentItem.id : null, 
       style_number: data.style_number.trim(),
       main_category_id: Number(data.main_category_id),
       category_ids: data.category_ids || [],
@@ -175,20 +186,41 @@ export default function MetadataPage() {
       market_id: parseId(data.market_id),
       metal_type_id: parseId(data.metal_type_id),
       designer_id: parseId(data.designer_id),
-      collection_name: parseText(data.collection_name),
-      description: parseText(data.description),
-      launch_date: parseText(data.launch_date),
-      tag_name: parseText(data.tag_name),
-      tag_description: parseText(data.tag_description),
-      customer_number: parseText(data.customer_number),
-      customer_name: parseText(data.customer_name),
       total_weight: parseWeight(data.total_weight),
       metal_weight: parseWeight(data.metal_weight),
     };
 
     try {
       await axios.post("http://localhost:8000/api/metadata/submit", payload);
-      alert("Product metadata submitted successfully!");
+      
+      // Clean up drafts memory and remove the submitted item entirely
+      const currentId = currentItem.id;
+      setDrafts(prev => {
+        const updated = { ...prev };
+        delete updated[currentId];
+        localStorage.setItem("jewelryMetadataDrafts", JSON.stringify(updated)); // Delete the draft from hard drive too
+        return updated;
+      });
+
+      const newQueue = queue.filter((_, idx) => idx !== currentIndex);
+      setQueue(newQueue);
+
+      // Determine next logical item
+      let nextIndex = currentIndex;
+      if (newQueue.length > 0 && currentIndex >= newQueue.length) {
+        nextIndex = newQueue.length - 1;
+      }
+      setCurrentIndex(nextIndex);
+
+      // Pre-load the draft for the new active item, or reset if blank
+      if (newQueue.length > 0) {
+        const nextProductId = newQueue[nextIndex].id;
+        
+        // Ensure we fetch from the freshest drafts state
+        const currentDrafts = JSON.parse(localStorage.getItem("jewelryMetadataDrafts") || "{}");
+        setFormData(currentDrafts[nextProductId] || getEmptyForm());
+      }
+
     } catch (err: any) {
       const detail = err.response?.data?.detail;
       let errorMessage = "Failed to submit product metadata.";
@@ -205,19 +237,20 @@ export default function MetadataPage() {
       }
 
       setErrorBanner(errorMessage);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   // --- UI Components ---
 
   const renderMultiSelectPills = (options: DropdownOption[], field: string, max: number = 3) => {
-    if (!options || options.length === 0) return <p className="text-sm text-gray-400">Please select parent category first.</p>;
+    if (!options || options.length === 0) return <p className="text-xs text-gray-400">Select parent category first.</p>;
     
     const selectedArray = formData[field as keyof typeof formData] as number[];
     const isMaxedOut = selectedArray.length >= max;
 
     return (
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
         {options.map(opt => {
           const isSelected = selectedArray.includes(opt.id);
           const isDisabled = !isSelected && isMaxedOut;
@@ -225,13 +258,14 @@ export default function MetadataPage() {
           return (
             <button
               key={opt.id}
+              type="button"
               onClick={() => handleMultiSelect(field, opt.id, max)}
               disabled={isDisabled}
-              className={`px-3 py-1.5 text-sm font-medium rounded-full border transition-all ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-full border transition-all ${
                 isSelected 
                   ? "bg-brand-blue border-brand-blue text-white shadow-sm" 
                   : isDisabled
-                    ? "bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed"
+                    ? "bg-gray-50 border-gray-200 text-gray-300 cursor-not-allowed"
                     : "bg-white border-gray-300 text-brand-dark hover:border-brand-peach hover:bg-brand-peach/10"
               }`}
             >
@@ -243,7 +277,7 @@ export default function MetadataPage() {
     );
   };
 
-  if (loadingQueue) return <div className="p-10 text-center">Loading pending items...</div>;
+  if (loadingQueue) return <div className="p-10 text-center text-gray-500">Loading pending items...</div>;
   
   if (queue.length === 0) return (
     <div className="flex flex-col items-center justify-center h-screen bg-brand-light">
@@ -256,160 +290,234 @@ export default function MetadataPage() {
   const currentProduct = queue[currentIndex];
 
   return (
-    <div className="flex h-screen bg-brand-light font-sans">
+    <div className="flex h-screen bg-brand-light font-sans overflow-hidden">
       
-      {/* LEFT: Image Preview & Queue Status */}
-      <div className="w-1/3 p-6 flex flex-col border-r border-gray-200 bg-white shadow-sm z-10">
-        <div className="mb-6 flex justify-between items-center bg-brand-light px-4 py-3 rounded-lg border border-gray-100">
-          <span className="font-bold text-brand-dark">Pending Queue</span>
-          <span className="bg-brand-peach text-brand-dark px-3 py-1 rounded-full text-sm font-bold shadow-sm">
-            {currentIndex + 1} of {queue.length}
-          </span>
-        </div>
-
-        <div className="flex-1 bg-gray-50 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center p-4 relative overflow-hidden">
+      {/* LEFT: Sidebar with Main Image & Vertical Interactive Queue */}
+      <div className="w-80 p-4 flex flex-col border-r border-gray-200 bg-white shadow-sm z-10">
+        
+        {/* Shrunk Main Image Preview */}
+        <div className="h-56 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-center p-2 relative overflow-hidden mb-4 shrink-0">
           <img 
             src={`http://localhost:8000/${currentProduct.cropped_image_path}`} 
             alt="Cropped Jewelry" 
-            className="max-w-full max-h-full object-contain drop-shadow-md rounded-lg"
+            className="max-w-full max-h-full object-contain drop-shadow-sm rounded-lg"
           />
         </div>
 
-        <div className="mt-6 flex space-x-3">
-          <button 
-            onClick={handleSkip}
-            disabled={currentIndex >= queue.length - 1}
-            className="flex-1 py-3 bg-white border border-gray-300 text-gray-600 font-bold rounded-xl flex items-center justify-center hover:bg-gray-50 hover:text-brand-dark transition-all disabled:opacity-50"
-          >
-            <SkipForward className="w-5 h-5 mr-2" /> Skip for Now
-          </button>
+        {/* FULL Vertical Interactive Queue */}
+        <div className="mb-2 flex-1 flex flex-col min-h-0">
+          <div className="flex justify-between items-end mb-2">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Pending Queue</span>
+            <span className="text-xs font-bold text-brand-blue bg-blue-50 px-2 py-0.5 rounded-md">{queue.length} Total</span>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+            {queue.map((item, idx) => {
+              const isCurrent = idx === currentIndex;
+              const hasDraft = !!drafts[item.id];
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => handleJumpToItem(idx)}
+                  className={`w-full border rounded-xl p-2 flex items-center transition-all text-left group ${
+                    isCurrent
+                      ? "bg-brand-peach/10 border-brand-peach shadow-sm"
+                      : hasDraft 
+                        ? "bg-blue-50/30 hover:bg-blue-50/80 border-blue-200"
+                        : "bg-gray-50 hover:bg-white border-gray-200 hover:border-brand-peach/50"
+                  }`}
+                >
+                  <div className={`w-12 h-12 bg-white rounded-lg border flex-shrink-0 flex items-center justify-center p-1 mr-3 ${
+                    isCurrent ? "border-brand-peach/50" : "border-gray-100 group-hover:shadow-sm"
+                  }`}>
+                    <img src={`http://localhost:8000/${item.cropped_image_path}`} alt="thumbnail" className="max-w-full max-h-full object-contain" />
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <p className={`text-xs font-bold ${isCurrent ? "text-brand-peach" : hasDraft ? "text-brand-blue" : "text-brand-dark"}`}>
+                      Item #{idx + 1} {isCurrent && "(Editing)"}
+                    </p>
+                    <p className="text-[10px] text-gray-400 truncate">
+                      {isCurrent ? "Currently active" : hasDraft ? "Draft saved" : "Click to edit"}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      {/* RIGHT: Metadata Form */}
-      <div className="w-2/3 p-8 overflow-y-auto bg-brand-light">
-        <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-          <h2 className="text-2xl font-bold text-brand-dark mb-6 border-b pb-4">Product Details</h2>
-          {errorBanner && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 text-sm">
-              <span>{errorBanner}</span>
+      {/* RIGHT: Ultra-Compact 3-Column Form Layout with Sticky Action Bar */}
+      <div className="flex-1 flex flex-col h-screen overflow-hidden bg-brand-light">
+        
+        {/* Scrollable Form Content */}
+        <div className="flex-1 overflow-y-auto p-6 pb-24">
+          <div className="max-w-6xl mx-auto bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="flex justify-between items-center mb-4 border-b pb-3">
+              <h2 className="text-xl font-bold text-brand-dark">Product Metadata Details</h2>
+              {drafts[currentProduct?.id] && (
+                <span className="text-xs font-bold text-brand-blue bg-blue-50 px-3 py-1 rounded-full">Draft Loaded</span>
+              )}
             </div>
-          )}
-          <div className="space-y-8">
-            {/* Required Basics */}
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-bold text-brand-dark mb-2">Style Number *</label>
-                <input 
-                  type="text" 
-                  value={formData.style_number}
-                  onChange={(e) => setFormData({...formData, style_number: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-brand-peach focus:border-brand-peach outline-none transition-all"
-                  placeholder="e.g. RG-1029"
-                />
+            
+            {errorBanner && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center text-red-700 text-xs">
+                <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0 text-red-500" />
+                <span>{errorBanner}</span>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-brand-dark mb-2">Main Category *</label>
-                <select 
-                  value={formData.main_category_id}
-                  onChange={(e) => setFormData({...formData, main_category_id: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-brand-peach outline-none bg-white"
-                >
-                  <option value="">-- Select Main Category --</option>
-                  {masterData.main_categories?.map((cat: any) => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            )}
 
-            {/* Cascading Multi-Selects */}
-            <div className="bg-brand-light/50 p-5 rounded-xl border border-brand-peach/30 space-y-6">
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-bold text-brand-dark">Category</label>
-                  <span className="text-xs font-semibold text-brand-blue bg-blue-50 px-2 py-1 rounded">Max 3</span>
+            {/* Compact 3-Column Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              
+              {/* COLUMN 1: Required Basics & Core IDs */}
+              <div className="space-y-4 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">1. Core Information</h3>
+                
+                <div>
+                  <label className="block text-xs font-bold text-brand-dark mb-1">Style Number *</label>
+                  <input 
+                    type="text" 
+                    value={formData.style_number}
+                    onChange={(e) => setFormData({...formData, style_number: e.target.value})}
+                    className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                    placeholder="e.g. RG-1029"
+                  />
                 </div>
-                {renderMultiSelectPills(categories, "category_ids")}
-              </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-bold text-brand-dark">Subcategory 1</label>
-                  <span className="text-xs font-semibold text-brand-blue bg-blue-50 px-2 py-1 rounded">Max 3</span>
+                <div>
+                  <label className="block text-xs font-bold text-brand-dark mb-1">Main Category *</label>
+                  <select 
+                    value={formData.main_category_id}
+                    onChange={(e) => setFormData({...formData, main_category_id: e.target.value})}
+                    className="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                  >
+                    <option value="">-- Select --</option>
+                    {masterData.main_categories?.map((cat: any) => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
                 </div>
-                {renderMultiSelectPills(sub1, "subcategory_1_ids")}
-              </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="text-sm font-bold text-brand-dark">Subcategory 2</label>
-                  <span className="text-xs font-semibold text-brand-blue bg-blue-50 px-2 py-1 rounded">Max 3</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-brand-dark mb-1">Metal Type</label>
+                    <select 
+                      value={formData.metal_type_id}
+                      onChange={(e) => setFormData({...formData, metal_type_id: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                    >
+                      <option value="">-- Select --</option>
+                      {masterData.metal_types?.map((item: any) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-brand-dark mb-1">Diamond Type</label>
+                    <select 
+                      value={formData.diamond_type_id}
+                      onChange={(e) => setFormData({...formData, diamond_type_id: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                    >
+                      <option value="">-- Select --</option>
+                      {masterData.diamond_types?.map((item: any) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                {renderMultiSelectPills(sub2, "subcategory_2_ids")}
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs font-bold text-brand-dark mb-1">Total Wt (g)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={formData.total_weight}
+                      onChange={(e) => setFormData({...formData, total_weight: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-brand-dark mb-1">Metal Wt (g)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      value={formData.metal_weight}
+                      onChange={(e) => setFormData({...formData, metal_weight: e.target.value})}
+                      className="w-full border border-gray-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-brand-peach outline-none bg-white"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
 
-            {/* Other Attributes */}
-            <div className="grid grid-cols-2 gap-6">
-               <div>
-                <label className="block text-sm font-bold text-brand-dark mb-2">Diamond Type</label>
-                <select 
-                  value={formData.diamond_type_id}
-                  onChange={(e) => setFormData({...formData, diamond_type_id: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg p-3 bg-white"
-                >
-                  <option value="">-- Select --</option>
-                  {masterData.diamond_types?.map((item: any) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
+              {/* COLUMN 2: Hierarchical Categories (Max 3) */}
+              <div className="space-y-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">2. Classifications</h3>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-brand-dark">Category (Max 3)</label>
+                  </div>
+                  {renderMultiSelectPills(categories, "category_ids")}
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-brand-dark">Subcategory 1 (Max 3)</label>
+                  </div>
+                  {renderMultiSelectPills(sub1, "subcategory_1_ids")}
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-brand-dark">Subcategory 2 (Max 3)</label>
+                  </div>
+                  {renderMultiSelectPills(sub2, "subcategory_2_ids")}
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-brand-dark mb-2">Metal Type</label>
-                <select 
-                  value={formData.metal_type_id}
-                  onChange={(e) => setFormData({...formData, metal_type_id: e.target.value})}
-                  className="w-full border border-gray-300 rounded-lg p-3 bg-white"
-                >
-                  <option value="">-- Select --</option>
-                  {masterData.metal_types?.map((item: any) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
+
+              {/* COLUMN 3: Gemstones & Attributes */}
+              <div className="space-y-3 bg-gray-50/50 p-4 rounded-xl border border-gray-100">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">3. Gemstones & Details</h3>
+
+                <div>
+                  <label className="block text-xs font-bold text-brand-dark mb-1">Shapes</label>
+                  {renderMultiSelectPills(masterData.shapes, "shape_ids", 10)}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-brand-dark mb-1">Colour Stones</label>
+                  {renderMultiSelectPills(masterData.colour_stones, "colour_stone_ids", 10)}
+                </div>
               </div>
-            </div>
 
-            {/* More Multi-Selects */}
-            <div>
-               <label className="block text-sm font-bold text-brand-dark mb-2">Shapes (Select multiple)</label>
-               {renderMultiSelectPills(masterData.shapes, "shape_ids", 10)}
             </div>
-
-            <div>
-               <label className="block text-sm font-bold text-brand-dark mb-2">Colour Stones (Select multiple)</label>
-               {renderMultiSelectPills(masterData.colour_stones, "colour_stone_ids", 10)}
-            </div>
-
-            {/* Submit */}
-            <div className="pt-6 border-t">
-              <button 
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="w-full bg-brand-blue text-white py-4 rounded-xl font-bold text-lg flex items-center justify-center hover:bg-blue-600 transition-all shadow-md disabled:opacity-70"
-              >
-                {submitting ? <Loader2 className="w-6 h-6 animate-spin" /> : <><Save className="w-6 h-6 mr-2"/> Save Metadata & Activate Product</>}
-              </button>
-            </div>
-
           </div>
         </div>
+
+        {/* Sticky Footer Action Bar */}
+        <div className="sticky bottom-0 bg-white/95 backdrop-blur-md px-6 py-4 border-t border-gray-200 shadow-lg flex justify-between items-center z-20">
+          <div className="text-xs text-gray-500">
+            Required: <span className="font-bold text-brand-dark">Style Number</span> & <span className="font-bold text-brand-dark">Main Category</span>
+          </div>
+          <button 
+            type="button"
+            onClick={handleSubmit}
+            className="bg-brand-blue text-white px-8 py-3 rounded-xl font-bold text-sm flex items-center justify-center hover:bg-blue-600 transition-all shadow-md"
+          >
+            <Save className="w-4 h-4 mr-2" /> Save Metadata & Next
+          </button>
+        </div>
+
       </div>
     </div>
   );
 }
 
-// Temporary CheckCircle icon for empty state
 function CheckCircle(props: any) {
   return (
     <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

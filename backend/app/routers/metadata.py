@@ -48,7 +48,12 @@ class SubmitMetadataRequest(BaseModel):
 @router.get("/pending-products")
 def get_pending_products(db: Session = Depends(get_db)):
     """Fetch all cropped products that are waiting for metadata filling."""
-    pending = db.query(models.CroppedProduct).filter(models.CroppedProduct.status == "PENDING").all()
+    pending = (
+        db.query(models.CroppedProduct)
+        .filter(models.CroppedProduct.status == "PENDING")
+        .order_by(models.CroppedProduct.id.asc()) # <--- THIS IS THE FIX
+        .all()
+    )
     return pending
 
 
@@ -206,23 +211,33 @@ def get_active_products(
 
 @router.delete("/products/{cropped_product_id}")
 def delete_product(cropped_product_id: int, db: Session = Depends(get_db)):
-    """Deletes a product, its metadata, and removes the image file from storage."""
+    """Deletes a product, its metadata, clears all tag links, and removes the image file."""
     prod = db.query(models.CroppedProduct).filter(models.CroppedProduct.id == cropped_product_id).first()
     if not prod:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    # Delete physical image file if it exists
+    # 1. Delete physical image file if it exists
     if prod.cropped_image_path and os.path.exists(prod.cropped_image_path):
         try:
             os.remove(prod.cropped_image_path)
         except Exception as e:
             print(f"Could not delete file: {e}")
 
-    # Delete metadata record if exists
+    # 2. Find the metadata and clear its child connections (shapes, cuts, stones, categories)
     meta = db.query(models.ProductMetadata).filter(models.ProductMetadata.cropped_product_id == cropped_product_id).first()
     if meta:
+        # Clear out relationship lists so association tables release their locks
+        for rel in ["shapes", "cuts", "colour_stones", "categories", "subcategory_1", "subcategory_2"]:
+            if hasattr(meta, rel):
+                setattr(meta, rel, [])
+        
+        # Force the database to process the clearing of links right now
+        db.flush()
+        
+        # Now delete the metadata record safely
         db.delete(meta)
 
+    # 3. Finally, delete the main product
     db.delete(prod)
     db.commit()
 

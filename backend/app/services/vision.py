@@ -73,14 +73,28 @@ def detect_sketches(pil_image, min_area_pct=0.0006, dilation_kernel_size=(25, 75
             x, y, w, h = cv2.boundingRect(cnt) #[cite: 6]
             tight_box = refine_box_to_ink_otsu(gray, [x, y, x + w, y + h]) #[cite: 6]
             
-            # Extract crop to validate
+            # Extract tight coordinates
             tx1, ty1, tx2, ty2 = tight_box
-            crop_bgr = img_np[ty1:ty2, tx1:tx2]
             
-            # Run validation logic before accepting
-            if is_valid_jewellery_sketch(crop_bgr, tight_box, pil_image.height):
+            # --- 10% PADDING LOGIC ---
+            box_w = tx2 - tx1
+            box_h = ty2 - ty1
+            pad_x = int(box_w * 0.10)
+            pad_y = int(box_h * 0.10)
+            
+            # Apply padding while keeping it strictly inside image boundaries
+            img_h, img_w = img_np.shape[:2]
+            px1 = max(0, tx1 - pad_x)
+            py1 = max(0, ty1 - pad_y)
+            px2 = min(img_w, tx2 + pad_x)
+            py2 = min(img_h, ty2 + pad_y)
+            
+            # Extract padded crop to validate
+            crop_bgr = img_np[py1:py2, px1:px2]
+            
+            # Run validation logic before accepting (passing the padded coordinates)
+            if is_valid_jewellery_sketch(crop_bgr, [px1, py1, px2, py2], pil_image.height):
                 # We return standard Python integers for JSON compatibility
-                valid_boxes.append({"x1": int(tx1), "y1": int(ty1), "x2": int(tx2), "y2": int(ty2)})
-
+                valid_boxes.append({"x1": int(px1), "y1": int(py1), "x2": int(px2), "y2": int(py2)})
     # Sort detected boxes top-to-bottom[cite: 6]
     return sorted(valid_boxes, key=lambda b: b["y1"]) #[cite: 6]

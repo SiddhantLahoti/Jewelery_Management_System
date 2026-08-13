@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import axios from "axios";
 import { Trash2, CheckCircle, MousePointer, Loader2 } from "lucide-react";
 
-
 interface Box {
   id: string;
   x1: number;
@@ -36,6 +35,10 @@ export default function ReviewPage() {
   const [imageDimensions, setImageDimensions] = useState({ width: 1, height: 1 });
   const [hoveredBoxId, setHoveredBoxId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  
+  // New State for the Success Overlay
+  const [showSuccessOverlay, setShowSuccessOverlay] = useState(false);
+  
   const imageRef = useRef<HTMLImageElement>(null);
 
   // Load data from session storage on mount
@@ -64,7 +67,6 @@ export default function ReviewPage() {
   const handleMouseDown = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!isDrawingMode || !imageRef.current) return;
     
-    // Calculate actual image coordinates based on scaled display
     const rect = imageRef.current.getBoundingClientRect();
     const scaleX = imageRef.current.naturalWidth / rect.width;
     const scaleY = imageRef.current.naturalHeight / rect.height;
@@ -99,7 +101,6 @@ export default function ReviewPage() {
   const handleMouseUp = () => {
     if (!isDrawing || !currentBox) return;
     
-    // Only save if the box is big enough (prevent accidental clicks)
     if (currentBox.x2 - currentBox.x1 > 20 && currentBox.y2 - currentBox.y1 > 20) {
       setBoxes([...boxes, currentBox]);
     }
@@ -110,6 +111,10 @@ export default function ReviewPage() {
 
   const deleteBox = (idToRemove: string) => {
     setBoxes(boxes.filter((b) => b.id !== idToRemove));
+    // NEW: Clear the hover state if we just deleted the hovered item
+    if (hoveredBoxId === idToRemove) {
+      setHoveredBoxId(null);
+    }
   };
 
   // --- SUBMIT LOGIC ---
@@ -128,19 +133,23 @@ export default function ReviewPage() {
     try {
       await axios.post("http://localhost:8000/api/ingestion/confirm-crops", payload);
       
-      // Move to next page or finish
       if (currentPageIndex < pages.length - 1) {
         const nextIndex = currentPageIndex + 1;
         setCurrentPageIndex(nextIndex);
         loadBoxesForPage(pages[nextIndex]);
+        setHoveredBoxId(null); // <--- NEW: Reset hover state for the new page
+        setLoading(false);
       } else {
-        alert("All pages approved! Moving to Metadata filling.");
-        router.push("/metadata"); 
+        // Trigger the beautiful success overlay instead of the alert
+        setShowSuccessOverlay(true);
+        // Wait 2 seconds, then automatically transition
+        setTimeout(() => {
+          router.push("/metadata"); 
+        }, 2000);
       }
     } catch (err) {
       console.error(err);
       alert("Failed to confirm crops.");
-    } finally {
       setLoading(false);
     }
   };
@@ -150,7 +159,7 @@ export default function ReviewPage() {
   const currentPage = pages[currentPageIndex];
 
   return (
-    <div className="flex h-screen bg-brand-light">
+    <div className="flex h-screen bg-brand-light relative">
       
       {/* LEFT: IMAGE CANVAS */}
       <div className="flex-1 p-6 flex flex-col overflow-hidden">
@@ -169,10 +178,8 @@ export default function ReviewPage() {
           </button>
         </div>
 
-        {/* The interactive image container */}
         <div className="flex-1 bg-brand-white rounded-xl shadow-sm border border-gray-100 overflow-auto relative flex justify-center items-start p-4 cursor-crosshair">
           <div className="relative inline-block select-none">
-            {/* Base Image served from FastAPI */}
             <img
                 ref={imageRef}
                 src={`http://localhost:8000/${currentPage.page_image_path}`}
@@ -184,7 +191,6 @@ export default function ReviewPage() {
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseUp}
                 onLoad={(e) => {
-                    // When image loads, save its exact original dimensions
                     setImageDimensions({
                     width: e.currentTarget.naturalWidth,
                     height: e.currentTarget.naturalHeight
@@ -192,7 +198,6 @@ export default function ReviewPage() {
                 }}
                 />
 
-            {/* Render all confirmed boxes */}
             {boxes.map((box, index) => {
               const isHovered = hoveredBoxId === box.id;
               return (
@@ -212,7 +217,6 @@ export default function ReviewPage() {
                     height: `${((box.y2 - box.y1) / imageDimensions.height) * 100}%`,
                   }}
                 >
-                  {/* Number Badge */}
                   <span 
                     className={`text-xs font-bold px-1.5 py-0.5 text-white ${
                       isHovered ? 'bg-brand-peach text-brand-dark' : 
@@ -225,18 +229,17 @@ export default function ReviewPage() {
               );
             })}
 
-                {/* Render the box currently being drawn */}
-                {currentBox && (
-                <div
-                    className="absolute border-[3px] border-brand-peach bg-brand-peach/20 pointer-events-none"
-                    style={{
-                    left: `${(currentBox.x1 / imageDimensions.width) * 100}%`,
-                    top: `${(currentBox.y1 / imageDimensions.height) * 100}%`,
-                    width: `${((currentBox.x2 - currentBox.x1) / imageDimensions.width) * 100}%`,
-                    height: `${((currentBox.y2 - currentBox.y1) / imageDimensions.height) * 100}%`,
-                    }}
-                />
-                )}
+            {currentBox && (
+              <div
+                  className="absolute border-[3px] border-brand-peach bg-brand-peach/20 pointer-events-none"
+                  style={{
+                  left: `${(currentBox.x1 / imageDimensions.width) * 100}%`,
+                  top: `${(currentBox.y1 / imageDimensions.height) * 100}%`,
+                  width: `${((currentBox.x2 - currentBox.x1) / imageDimensions.width) * 100}%`,
+                  height: `${((currentBox.y2 - currentBox.y1) / imageDimensions.height) * 100}%`,
+                  }}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -290,6 +293,22 @@ export default function ReviewPage() {
           )}
         </button>
       </div>
+
+      {/* THE NEW SUCCESS OVERLAY */}
+      {showSuccessOverlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm transition-opacity">
+          <div className="bg-white p-10 rounded-2xl shadow-2xl flex flex-col items-center transform scale-100 transition-transform">
+            <div className="relative mb-6">
+              <CheckCircle className="w-20 h-20 text-green-500" />
+              <div className="absolute -bottom-2 -right-2 bg-white rounded-full p-1 shadow-sm border border-gray-100">
+                <Loader2 className="w-6 h-6 animate-spin text-brand-blue" />
+              </div>
+            </div>
+            <h2 className="text-2xl font-bold text-brand-dark mb-2">All Pages Approved!</h2>
+            <p className="text-gray-500 font-medium">Auto-cropping images and loading metadata queue...</p>
+          </div>
+        </div>
+      )}
       
     </div>
   );
